@@ -25,8 +25,15 @@ class FakeGraph(GraphStore):
     def add_node(self, ns, entity_id, ntype=None, props=None):
         self._node(ns, entity_id)
 
-    def add_edge(self, ns, src, relation, dst):
-        self._node(ns, src)["edges"].append({"relation": relation, "target": dst})
+    def add_edge(self, ns, src, relation, dst, weight=1.0, props=None):
+        self._node(ns, src)["edges"].append(
+            {
+                "relation": relation,
+                "target": dst,
+                "weight": weight,
+                "props": dict(props) if props is not None else {},
+            }
+        )
         self._node(ns, dst)
 
     def get_node(self, ns, entity_id):

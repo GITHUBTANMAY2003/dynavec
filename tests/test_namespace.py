@@ -102,8 +102,15 @@ class FakeGraph(client_mod.GraphStore):
     def add_node(self, ns, entity_id, ntype=None, props=None):
         self._node(ns, entity_id)
 
-    def add_edge(self, ns, src, relation, dst):
-        self._node(ns, src)["edges"].append({"relation": relation, "target": dst})
+    def add_edge(self, ns, src, relation, dst, weight=1.0, props=None):
+        self._node(ns, src)["edges"].append(
+            {
+                "relation": relation,
+                "target": dst,
+                "weight": weight,
+                "props": dict(props) if props is not None else {},
+            }
+        )
         self._node(ns, dst)
 
     def link_docs(self, ns, entity_id, doc_ids):
@@ -133,14 +140,20 @@ class FakeGraph(client_mod.GraphStore):
     def get_node(self, ns, entity_id):
         return self._nodes.get((ns, entity_id))
 
-    def neighbors(self, ns, entity_id, relation=None):
+    def neighbors(self, ns, entity_id, relation=None, *, min_weight=None, with_weights=False):
         node = self.get_node(ns, entity_id)
         if not node:
             return []
-        return [
-            e["target"] for e in node["edges"]
-            if relation is None or e["relation"] == relation
+        edges = [
+            e
+            for e in node["edges"]
+            if (relation is None or e["relation"] == relation)
+            and (min_weight is None or float(e.get("weight", 1.0)) >= min_weight)
         ]
+        if with_weights:
+            edges.sort(key=lambda e: float(e.get("weight", 1.0)), reverse=True)
+            return [(e["target"], float(e.get("weight", 1.0))) for e in edges]
+        return [e["target"] for e in edges]
 
     def get_docs(self, ns, entity_ids):
         seen, out = set(), []

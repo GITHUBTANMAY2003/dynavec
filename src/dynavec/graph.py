@@ -15,7 +15,8 @@ graph edges narrow and guide the vector search instead of scanning everything.
 
 Storage (single-table, works with the existing pk-only schema):
     node:  pk = "{ns}#node#{entity_id}"  attrs: ntype, props, edges[], docs[]
-    edges are embedded adjacency lists: [{"relation": r, "target": entity_id}, ...]
+    edges are embedded adjacency lists:
+    [{"relation": r, "target": entity_id, "weight": w, "props": {...}}, ...]
 
 Note: embedded adjacency keeps a node's fan-out in one 400KB item. Very high
 fan-out entities want a sort-key adjacency design (roadmap).
@@ -25,7 +26,8 @@ from __future__ import annotations
 
 import re
 from collections import deque
-from typing import Any, cast
+from decimal import Decimal
+from typing import Any, Literal, cast, overload
 
 from .config import DynavecConfig
 from .utils import (
@@ -203,7 +205,15 @@ class GraphStore:
         )
 
     @retry()
-    def add_edge(self, ns: str, src: str, relation: str, dst: str) -> None:
+    def add_edge(
+        self,
+        ns: str,
+        src: str,
+        relation: str,
+        dst: str,
+        weight: float = 1.0,
+        props: Props | None = None,
+    ) -> None:
         # ensure both endpoints exist, then append the edge to src's adjacency
         self.add_node(ns, src)
         self.add_node(ns, dst)
@@ -211,7 +221,14 @@ class GraphStore:
             Key={"pk": self._node_pk(ns, src)},
             UpdateExpression="SET edges = list_append(if_not_exists(edges, :empty), :e)",
             ExpressionAttributeValues={
-                ":e": [{"relation": relation, "target": dst}],
+                ":e": [
+                    {
+                        "relation": relation,
+                        "target": dst,
+                        "weight": Decimal(str(weight)),
+                        "props": dict(props) if props is not None else {},
+                    }
+                ],
                 ":empty": [],
             },
         )
@@ -294,15 +311,61 @@ class GraphStore:
         item = resp.get("Item")
         return cast(dict[str, Any], item) if item is not None else None
 
-    def neighbors(self, ns: str, entity_id: str, relation: str | None = None) -> list[str]:
+    @overload
+    def neighbors(
+        self,
+        ns: str,
+        entity_id: str,
+        relation: str | None = None,
+        *,
+        min_weight: float | None = None,
+        with_weights: Literal[False] = False,
+    ) -> list[str]: ...
+
+    @overload
+    def neighbors(
+        self,
+        ns: str,
+        entity_id: str,
+        relation: str | None = None,
+        *,
+        min_weight: float | None = None,
+        with_weights: Literal[True],
+    ) -> list[tuple[str, float]]: ...
+
+    @overload
+    def neighbors(
+        self,
+        ns: str,
+        entity_id: str,
+        relation: str | None = None,
+        *,
+        min_weight: float | None = None,
+        with_weights: bool,
+    ) -> list[str] | list[tuple[str, float]]: ...
+
+    def neighbors(
+        self,
+        ns: str,
+        entity_id: str,
+        relation: str | None = None,
+        *,
+        min_weight: float | None = None,
+        with_weights: bool = False,
+    ) -> list[str] | list[tuple[str, float]]:
         node = self.get_node(ns, entity_id)
         if not node:
             return []
-        out = []
-        for edge in node.get("edges", []):
-            if relation is None or edge.get("relation") == relation:
-                out.append(edge["target"])
-        return out
+        edges = [
+            edge
+            for edge in node.get("edges", [])
+            if (relation is None or edge.get("relation") == relation)
+            and (min_weight is None or float(edge.get("weight", 1.0)) >= min_weight)
+        ]
+        if with_weights:
+            edges.sort(key=lambda edge: float(edge.get("weight", 1.0)), reverse=True)
+            return [(edge["target"], float(edge.get("weight", 1.0))) for edge in edges]
+        return [edge["target"] for edge in edges]
 
     def get_docs(self, ns: str, entity_ids: list[str]) -> list[str]:
         seen: set[str] = set()

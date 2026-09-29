@@ -1280,11 +1280,13 @@ class Dynavec:
         *,
         namespace: str = "default",
         bidirectional: bool = False,
+        weight: float = 1.0,
+        props: Metadata | None = None,
     ) -> None:
         """Relate two entities: ``(src) -[relation]-> (dst)``."""
-        self.graph.add_edge(namespace, src, relation, dst)
+        self.graph.add_edge(namespace, src, relation, dst, weight=weight, props=props)
         if bidirectional:
-            self.graph.add_edge(namespace, dst, relation, src)
+            self.graph.add_edge(namespace, dst, relation, src, weight=weight, props=props)
 
     def graph_delete_node(
         self,
